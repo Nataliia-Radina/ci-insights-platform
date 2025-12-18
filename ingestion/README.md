@@ -1,0 +1,1 @@
+downloads job logs as ZIPs

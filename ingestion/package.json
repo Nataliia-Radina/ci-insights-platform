@@ -1,0 +1,22 @@
+{
+  "name": "ingestion",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "ingest": "ts-node --project tsconfig.node.json src/index.ts",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@octokit/rest": "^22.0.1",
+    "dotenv": "^17.2.3"
+  },
+  "devDependencies": {
+    "@types/node": "^25.0.3",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  }
+}
