@@ -1,42 +1,20 @@
 import "dotenv/config";
 import { Octokit } from "@octokit/rest";
-import fs from "node:fs";
 import path from "node:path";
-import { pipeline } from "node:stream";
-import { promisify } from "node:util";
+import fs from "node:fs";
 
-const streamPipeline = promisify(pipeline);
-
-type Args = { owner: string; repo: string; limit: number };
-
-function parseArgs(): Args {
-  const owner = process.argv[2];
-  const repo = process.argv[3];
-  const limit = Number(process.argv[4] ?? "5");
-  if (!owner || !repo) {
-    console.error("Usage: ts-node src/index.ts <owner> <repo> [limit]");
-    process.exit(1);
-  }
-  return { owner, repo, limit };
-}
-
-async function downloadToFile(url: string, outPath: string) {
-  const res = await fetch(url, { redirect: "follow" });
-  if (!res.ok || !res.body) {
-    throw new Error(`Download failed: ${res.status} ${res.statusText}`);
-  }
-  await streamPipeline(res.body as any, fs.createWriteStream(outPath));
-}
+import { getToken, parseArgs } from "./config";
+import { downloadToFile } from "./download";
+import { ensureDir, writeJson } from "./filesystem";
 
 async function main() {
-  const token = process.env.GITHUB_TOKEN;
-  if (!token) throw new Error("Missing GITHUB_TOKEN in ingestion/.env");
-
+  const token = getToken();
   const { owner, repo, limit } = parseArgs();
+
   const octokit = new Octokit({ auth: token });
 
   const outDir = path.resolve("out", owner, repo);
-  fs.mkdirSync(outDir, { recursive: true });
+  ensureDir(outDir);
 
   // 1) List workflow runs (recent)
   const runs = await octokit.actions.listWorkflowRunsForRepo({
@@ -94,27 +72,25 @@ async function main() {
   };
 
   // 4) Download logs per job (ZIP) via REST endpoint
-  for (const job of jobs) {
-    const jobOutDir = path.join(outDir, String(runId));
-    fs.mkdirSync(jobOutDir, { recursive: true });
+  const runDir = path.join(outDir, String(runId));
+  ensureDir(runDir);
 
-    // This endpoint requires auth; Octokit gives us a signed URL via redirect.
+  for (const job of jobs) {
     const logsResp = await octokit.request(
       "GET /repos/{owner}/{repo}/actions/jobs/{job_id}/logs",
       { owner, repo, job_id: job.id, request: { redirect: "manual" } }
     );
 
-    // Octokit may follow redirect internally depending on runtime; safest is to read redirect URL.
     const redirectUrl =
       (logsResp as any).headers?.location ??
-      (logsResp as any).url; // fallback
+      (logsResp as any).url;
 
     if (!redirectUrl) {
       console.warn(`No log URL for job ${job.id} (${job.name})`);
       continue;
     }
 
-    const zipPath = path.join(jobOutDir, `job-${job.id}.zip`);
+    const zipPath = path.join(runDir, `job-${job.id}.zip`);
     await downloadToFile(redirectUrl, zipPath);
 
     index.artifacts.push({ jobId: job.id, zipPath });
@@ -122,9 +98,8 @@ async function main() {
   }
 
   // 5) Save index JSON
-  const indexPath = path.join(outDir, String(runId), "index.json");
-  fs.mkdirSync(path.dirname(indexPath), { recursive: true });
-  fs.writeFileSync(indexPath, JSON.stringify(index, null, 2), "utf-8");
+  const indexPath = path.join(runDir, "index.json");
+  writeJson(indexPath, index);
 
   console.log(`Done. Index: ${indexPath}`);
 }
